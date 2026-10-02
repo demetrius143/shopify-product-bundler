@@ -2,12 +2,21 @@
 
 ## What this repo is
 
-A **learning** repo for Shopify app development. The goal is to practise the whole loop: scaffold an
-app, add extensions, write a Shopify Function, then do the store plumbing that actually makes it go
-live (scopes, app-owned metafields, function registration).
+**Product Bundler** — a production Shopify app for selling **product bundles** without holding bundle
+inventory. A merchant marks a product as a bundle and chooses its component variants; the app expands
+it into those components in the cart and at checkout.
 
-It is not a product. Prefer the clear, well-commented implementation over cleverness, and keep the
-manual store steps documented — they are the part that is easiest to forget.
+Two halves talking through one contract — the app-owned `$app` / `bundle_components` product
+metafield:
+
+- **Admin** (`bundle-admin-block`, `bundle-admin-action`) writes it.
+- **Storefront** (`cart-transformer-extension`, a Rust cart transform function) reads it.
+
+Extension-only: no server and no database to run, so state lives in Shopify metafields and
+metaobjects.
+
+Prefer the clear, well-commented implementation over cleverness, and keep the manual store steps
+documented — they are the part that is easiest to forget.
 
 ## Working on Shopify platform code
 
@@ -24,7 +33,12 @@ Practical workflow:
 - **Never run `shopify app deploy`.** Releases are the developer's call.
 - Never write `ownerId`/variant ids from memory — query the store for real GIDs.
 
-## The first feature: `cart-transformer-extension`
+## The bundle feature
+
+Three extensions make it up: the function that performs the expansion, and a block/action pair that
+configures it from the product page.
+
+### `cart-transformer-extension`
 
 A Rust Shopify Function on the `cart.transform.run` target that expands a bundle into its components.
 
@@ -62,6 +76,28 @@ Five files define the whole thing; the README has the diagram.
 
 This replaced an earlier attempt at "buy X get Y free" promotions — see the per-unit gotcha below for
 why that shape does not fit `lineExpand`. See the README for the config contract and activation steps.
+
+### The admin extensions
+
+`bundle-admin-block` (target `admin.product-details.block.render`) reports bundle status on the
+product page; `bundle-admin-action` (`admin.product-details.action.render`) is the editor and the
+**only** writer of the config metafield. It never writes a price — a bundle is charged at the bundle
+product's own price.
+
+- The block must be **pinned by the merchant** and does not appear on its own. One pin covers every
+  product page, because the card reads the product from context (`shopify.data.selected[0]`).
+- The block launches the action over the **extension protocol**:
+  `extension:<action-handle>/<action-target>`, e.g.
+  `extension:bundle-admin-action/admin.product-details.action.render`. Single colon — the installed
+  type's JSDoc `@example` shows `extension://`, which is inexact. It is the only supported direction
+  (block to action) and only between extensions on the **same resource page**.
+- The picker is **product-level on purpose**. Shopify titles an option-less product's only variant
+  `Default Title`, which the picker renders as a blank row, so those products cannot be told apart.
+  Resolve each picked product to a variant ourselves before storing anything, and do not trust
+  `Product.variants` from the picker payload — it is typed `Partial<ProductVariant>[]`, so `id` may be
+  missing and it may not be the full list. The function needs variant GIDs.
+- Products with more than one variant get a per-row `<s-select>`/`<s-option>` chooser. Refuse a
+  variant another row already uses, or the same variant would be expanded twice.
 
 ## Hard-won gotchas
 
@@ -130,3 +166,7 @@ why that shape does not fit `lineExpand`. See the README for the config contract
   rejected the operation. **Silence = not running** (stale WASM, unregistered transform, or no
   readable metafield on that product) — note this is also what a correct function does when a product
   has no bundle config, so silence proves nothing on its own.
+- `scripts/validate.mjs --api polaris-admin-extensions` needs `--language jsx`, and its TypeScript
+  check **ignores JSDoc**. Property access through a local `gql()` helper therefore reports
+  `Property 'x' does not exist on type 'unknown'` even when `tsc` is clean. Trust the editor's real TS
+  diagnostics for that class of error rather than contorting the code around the validator.

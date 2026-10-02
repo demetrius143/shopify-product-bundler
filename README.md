@@ -1,24 +1,34 @@
-# lucrative-outsource-app
+# Product Bundler
 
-A **learning** Shopify app. The point of this repo is to practise app development end to end:
-scaffolding, extensions, Shopify Functions, and the store plumbing that actually makes a feature go
-live.
+A Shopify app for selling **product bundles** without holding bundle inventory.
 
-Built from the [extension-only app template](https://github.com/Shopify/shopify-app-template-extension-only)
-(Preact + Vite + App Bridge + Direct API access — no server), then grown from there.
+A merchant marks any product as a bundle and chooses the variants it contains, directly from the
+product page in the Shopify admin. From then on the app expands that product into its components in
+the cart and at checkout — the buyer chooses one bundle, while Shopify fulfils and tracks the parts
+it is actually made of. Components keep their own inventory, so stock stays accurate without a
+separate bundled SKU to maintain.
 
-The first real feature is the **bundle cart transform function** in
-[`extensions/cart-transformer-extension`](./extensions/cart-transformer-extension): a bundle product
-is automatically expanded into its component variants in the cart and at checkout, with optional
-per-component pricing.
+Two halves, one data contract:
 
-## What's in here
+- **Admin** — a block pinned to the product page reports bundle status, and an action extension opens
+  the bundle editor: pick the products, choose variants, set quantities, save.
+- **Storefront** — a Rust [cart transform function](https://shopify.dev/docs/api/functions/latest/cart-transform)
+  reads that configuration on every cart change and emits the expansion.
+
+Extension-only, so there is no server to host and no database to run: state lives in Shopify
+metafields and metaobjects. Built from the
+[extension-only app template](https://github.com/Shopify/shopify-app-template-extension-only)
+(Preact + Vite + App Bridge + Direct API access).
+
+## Extensions
 
 | Extension | Type | Target | What it does |
 | --- | --- | --- | --- |
+| [`cart-transformer-extension`](./extensions/cart-transformer-extension) | Function (Rust) | `cart.transform.run` | Expands a bundle product into its component variants in the cart and at checkout. |
+| [`bundle-admin-block`](./extensions/bundle-admin-block) | UI extension | `admin.product-details.block.render` | Pinned card on the product page: reports whether the product is a bundle and launches the editor. |
+| [`bundle-admin-action`](./extensions/bundle-admin-action) | UI extension | `admin.product-details.action.render` | The bundle editor — product picker, variant chooser, per-component quantity, save and unbundle. |
 | [`app-home`](./extensions/app-home) | UI extension | `admin.app.home.render` | The app's admin landing page plus a working FAQ CRUD feature. Preact + Polaris web components; calls the Admin GraphQL API directly from the browser. |
 | [`app-tools`](./extensions/app-tools) | UI extension | `admin.app.tools.data` | Tool/instruction payload driven by `tools.json` and `instructions.md`. |
-| [`cart-transformer-extension`](./extensions/cart-transformer-extension) | Function (Rust) | `cart.transform.run` | Expands a bundle product into its component variants. |
 
 Shared, framework-agnostic code lives in [`shared/`](./shared).
 
@@ -32,8 +42,9 @@ Two storage patterns are used, both without a database:
   [`shared/models/faq.ts`](./shared/models/faq.ts) is the shared model that lists, creates, updates
   and deletes them through the Admin GraphQL API via the direct-access endpoint
   (`shopify:admin/api/2026-07/graphql.json`).
-- **A plain shop metafield** — the cart transform's promo config (see below). Simpler, and read
-  directly by the function rather than by the UI.
+- **An app-owned product metafield** — the bundle configuration, `$app` / `bundle_components` on the
+  **bundle product**. Simpler than a metaobject, and read straight by the function rather than by the
+  UI. Written by the bundle editor, never by hand.
 
 Both are synced to Shopify when you run `shopify app dev` or `shopify app deploy`.
 
@@ -75,6 +86,32 @@ buyer adds one, the function emits a `lineExpand` operation that replaces the li
 components.
 
 Components are defined per product, in the app-owned `json` metafield `$app` / `bundle_components`.
+
+### Configuring a bundle
+
+Bundles are configured from the product page in the admin, not by hand:
+
+1. **Pin the block.** Admin blocks are opt-in — the merchant adds the *Bundle* block to the product
+   page once, from the block picker. One pin covers every product page, because the card reads the
+   product it is rendered for.
+2. **Open the editor.** *Make this product a Bundle* (or *Edit Bundle* once configured) launches the
+   action extension, which opens as a modal over the page and refreshes it on close.
+3. **Choose the components.** *Add products* opens the native resource picker **at product level**. A
+   variant-level picker is the wrong instrument here: Shopify titles the only variant of an
+   option-less product `Default Title`, which that picker renders as a blank row, so such products
+   cannot be told apart. Products always carry a readable name. Each picked product is resolved to
+   its variant, and any product with alternatives offers a variant chooser on its row.
+4. **Set quantities and save.** *Save* writes the metafield; *Unbundle* deletes it, returning the
+   product to a plain product.
+
+The block hands off to the action over the
+[extension protocol](https://shopify.dev/docs/apps/build/admin/actions-blocks/connect-admin-extensions)
+(`extension:<action-handle>/<action-target>`). That is the only supported direction — a block to an
+action on the **same resource page**.
+
+The editor never writes a price: a bundle is always charged at the bundle product's own price.
+Per-component pricing is a function-level capability (see [Pricing](#pricing)) that the admin UI
+deliberately leaves alone.
 
 ### Config shape
 
@@ -207,15 +244,22 @@ editing the query requires a rebuild, not just a re-deploy.
 
 Three things must all be true, and each one fails *silently* on its own.
 
-**1. Scope.** `shopify.app.toml` must include `write_cart_transforms`:
+**1. Scope.** `shopify.app.toml` needs both scopes:
 
 ```toml
 [access_scopes]
 scopes = "write_cart_transforms,write_products"
 ```
 
-**2. Config.** Write the metafield onto the **bundle product** from the app's GraphiQL console (`$app`
-resolves to *the calling app*, so this must be done as the app):
+`write_cart_transforms` is what allows the function to be registered at all — without it the app
+cannot create a cart transform. `write_products` is what lets the bundle editor read products and
+write the configuration metafield.
+
+**2. Config.** Every bundle needs its configuration metafield. The
+[bundle editor](#configuring-a-bundle) writes this in normal use, so there is usually nothing to do
+here — but seeding a bundle by hand (scripting, CI, or building a test fixture) means writing it
+yourself. Use the app's GraphiQL console: `$app` resolves to *the calling app*, so it must be done as
+the app.
 
 ```graphql
 mutation {
