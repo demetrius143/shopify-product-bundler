@@ -15,8 +15,8 @@ Two halves, one data contract:
 - **Storefront** — a Rust [cart transform function](https://shopify.dev/docs/api/functions/latest/cart-transform)
   reads that configuration on every cart change and emits the expansion.
 
-Extension-only, so there is no server to host and no database to run: state lives in Shopify
-metafields and metaobjects. Built from the
+Extension-only, so there is no server to host and no database to run: the app's whole state is a
+single app-owned metafield. Built from the
 [extension-only app template](https://github.com/Shopify/shopify-app-template-extension-only)
 (Preact + Vite + App Bridge + Direct API access).
 
@@ -27,26 +27,20 @@ metafields and metaobjects. Built from the
 | [`cart-transformer-extension`](./extensions/cart-transformer-extension) | Function (Rust) | `cart.transform.run` | Expands a bundle product into its component variants in the cart and at checkout. |
 | [`bundle-admin-block`](./extensions/bundle-admin-block) | UI extension | `admin.product-details.block.render` | Pinned card on the product page: reports whether the product is a bundle and launches the editor. |
 | [`bundle-admin-action`](./extensions/bundle-admin-action) | UI extension | `admin.product-details.action.render` | The bundle editor — product picker, variant chooser, per-component quantity, save and unbundle. |
-| [`app-home`](./extensions/app-home) | UI extension | `admin.app.home.render` | The app's admin landing page plus a working FAQ CRUD feature. Preact + Polaris web components; calls the Admin GraphQL API directly from the browser. |
-| [`app-tools`](./extensions/app-tools) | UI extension | `admin.app.tools.data` | Tool/instruction payload driven by `tools.json` and `instructions.md`. |
-
-Shared, framework-agnostic code lives in [`shared/`](./shared).
+| [`app-home`](./extensions/app-home) | UI extension | `admin.app.home.render` | The app's landing page in the admin: what the app does and how to configure a bundle. |
 
 ## Data model
 
-Two storage patterns are used, both without a database:
+There is no database, and the app keeps no copy of your catalog. Its entire state is one app-owned
+metafield:
 
-- **Metaobjects + metafields** — the FAQ feature in `app-home`. `shopify.app.toml` defines an
-  `app.faq` metaobject (`question`, `answer`, `show_on_faq_page`) and an `app.faq` **product**
-  metafield of type `metaobject_reference<$app:faq>` with `merchant_read_write` access.
-  [`shared/models/faq.ts`](./shared/models/faq.ts) is the shared model that lists, creates, updates
-  and deletes them through the Admin GraphQL API via the direct-access endpoint
-  (`shopify:admin/api/2026-07/graphql.json`).
-- **An app-owned product metafield** — the bundle configuration, `$app` / `bundle_components` on the
-  **bundle product**. Simpler than a metaobject, and read straight by the function rather than by the
-  UI. Written by the bundle editor, never by hand.
+- **`$app` / `bundle_components`** on the **bundle product** — a `json` metafield holding that
+  bundle's components, read straight by the cart transform function. Written by the bundle editor,
+  never by hand.
 
-Both are synced to Shopify when you run `shopify app dev` or `shopify app deploy`.
+It is deliberately left undeclared in `shopify.app.toml`, which is part of what keeps it app-owned
+rather than a merchant-visible field. Everything else the app needs — product titles, variants,
+prices — is read from the Admin GraphQL API at request time.
 
 ## Prerequisites
 
@@ -276,8 +270,9 @@ mutation {
 `ownerId` is the **bundle product's** GID — not the shop, and not the store handle. Get it with
 `{ product(id: "...") { id } }` or from the product's admin URL.
 
-To let the merchant see and edit this in the admin, declare it in `shopify.app.toml` as a product
-metafield (the same pattern as the FAQ metafield already in there).
+Declaring it in `shopify.app.toml` would promote it to a merchant-visible product metafield with a
+readable name. It is left undeclared so it stays app-owned, and so it does not add a field to every
+product page.
 
 **3. Registration.** A cart transform does nothing until it is registered — this is the step that makes
 a deployed function look completely inert:
@@ -405,4 +400,3 @@ local test suite does not rule it out.
 - [Shopify CLI](https://shopify.dev/docs/apps/tools/cli)
 - [Polaris web components](https://shopify.dev/docs/api/app-home/web-components)
 - [App Bridge](https://shopify.dev/docs/api/app-bridge)
-- [Metaobjects](https://shopify.dev/docs/apps/custom-data/metaobjects)
