@@ -37,3 +37,7 @@ shared/types/graphql
 
 # Ignore learing documentation
 docs/*
+
+# Ignore generated files
+extensions/bundle-admin-action/manifest.json
+extensions/bundle-admin-block/manifest.json
