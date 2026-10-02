@@ -18,7 +18,9 @@ embedded_app_direct_api_access = true
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "write_products"
+# write_cart_transforms is required for the cart.transform.run function target.
+# write_products is used by the app-home admin UI to read product data.
+scopes = "write_cart_transforms,write_products"
 
 [auth]
 redirect_urls = [ "https://shopify.dev/apps/default-app-home/api/auth" ]

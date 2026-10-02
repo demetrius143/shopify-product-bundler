@@ -1,8 +1,29 @@
-query CartTransformRunInput {
+# Input query for the cart.transform.run target.
+#
+# The operation must be named `Input` for Rust functions (Shopify convention) so that
+# the generated types live under `schema::cart_transform_run::input::...`.
+#
+# Each cart line is checked for a bundle definition stored on its **product**, in the
+# app-owned `json` metafield `$app` / `bundle_components`.
+query Input {
+  # Needed to convert component prices (configured in the shop's currency) into the
+  # currency the buyer is actually seeing.
+  presentmentCurrencyRate
   cart {
     lines {
       id
       quantity
+      merchandise {
+        __typename
+        ... on ProductVariant {
+          id
+          product {
+            bundleComponents: metafield(namespace: "$app", key: "bundle_components") {
+              jsonValue
+            }
+          }
+        }
+      }
     }
   }
 }

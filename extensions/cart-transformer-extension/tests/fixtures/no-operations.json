@@ -3,11 +3,19 @@
     "export": "cart_transform_run",
     "target": "cart.transform.run",
     "input": {
+      "presentmentCurrencyRate": "1.0",
       "cart": {
         "lines": [
           {
             "id": "gid://shopify/CartLine/1",
-            "quantity": 1
+            "quantity": 1,
+            "merchandise": {
+              "__typename": "ProductVariant",
+              "id": "gid://shopify/ProductVariant/1",
+              "product": {
+                "bundleComponents": null
+              }
+            }
           }
         ]
       }

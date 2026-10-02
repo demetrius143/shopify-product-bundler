@@ -34,3 +34,6 @@ shared/types/graphql
 *.njsproj
 *.sln
 *.sw?
+
+# Ignore learing documentation
+docs/*
